@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.24;
+
+import "fhevm/lib/TFHE.sol";
+
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+/**
+ * @title AcademicReview
+ * @dev Anonymous Academic Peer Review system using Zama FHE
+ * @notice All reviews and evaluations are encrypted for complete anonymity
+ */
+contract AcademicReview is ReentrancyGuard, Ownable {
+    
+    struct Paper {
+        uint256 id;
+        string title;
+        string paperAbstract;
+        string category;
+        address author;
+        uint256 timestamp;
+        uint256 reviewCount;
+        bool isActive;
+    }
+
+    struct Review {
+        uint256 paperId;
+        address reviewer;
+        ebool encryptedRecommendation; // FHE encrypted boolean (accept/reject)
+        euint8 encryptedQuality; // FHE encrypted quality score (1-4)
+        string comments; // Publicly visible comments
+        uint256 timestamp;
+    }
+
+    // State variables
+    uint256 public paperCounter;
+    uint256 public reviewCounter;
+    
+    mapping(uint256 => Paper) public papers;
+    mapping(uint256 => Review) public reviews;
+    mapping(uint256 => uint256[]) public paperReviews; // paperId => reviewIds
+    mapping(address => uint256[]) public userPapers; // author => paperIds
+    mapping(address => mapping(uint256 => bool)) public hasReviewed; // reviewer => paperId => bool
+
+    // Events
+    event PaperSubmitted(
+        uint256 indexed paperId,
+        address indexed author,
+        string title,
+        string category
+    );
+
+    event ReviewSubmitted(
+        uint256 indexed reviewId,
+        uint256 indexed paperId,
+        address indexed reviewer
+    );
+
+    event ReviewDecrypted(
+        uint256 indexed reviewId,
+        bool recommendation,
+        uint8 quality
+    );
+
+    constructor() Ownable(msg.sender) {}
+
+    /**
+     * @dev Submit a paper for review
+     */
+    function submitPaper(
+        string memory _title,
+        string memory _paperAbstract,
+        string memory _category
+    ) external nonReentrant {
+        require(bytes(_title).length > 0, "Title cannot be empty");
+        require(bytes(_paperAbstract).length > 0, "Abstract cannot be empty");
+        require(bytes(_category).length > 0, "Category cannot be empty");
+
+        paperCounter++;
+        
+        papers[paperCounter] = Paper({
+            id: paperCounter,
+            title: _title,
+            paperAbstract: _paperAbstract,
+            category: _category,
+            author: msg.sender,
+            timestamp: block.timestamp,
+            reviewCount: 0,
+            isActive: true
+        });
+
+        userPapers[msg.sender].push(paperCounter);
+
+        emit PaperSubmitted(paperCounter, msg.sender, _title, _category);
+    }
+
+    /**
+     * @dev Submit a confidential review for a paper
+     * @param _paperId The ID of the paper to review
+     * @param _recommendation Boolean recommendation (true = accept, false = reject)
+     * @param _quality Quality score (1-4: poor, acceptable, good, excellent)
+     * @param _comments Public review comments
+     */
+    function submitReview(
+        uint256 _paperId,
+        bool _recommendation,
+        uint8 _quality,
+        string memory _comments
+    ) external nonReentrant {
+        require(_paperId > 0 && _paperId <= paperCounter, "Invalid paper ID");
+        require(papers[_paperId].isActive, "Paper is not active");
+        require(papers[_paperId].author != msg.sender, "Cannot review your own paper");
+        require(!hasReviewed[msg.sender][_paperId], "Already reviewed this paper");
+        require(_quality >= 1 && _quality <= 4, "Quality must be between 1 and 4");
+
+        reviewCounter++;
+        
+        // Encrypt the recommendation and quality using FHE
+        ebool encryptedRecommendation = TFHE.asEbool(_recommendation ? 1 : 0);
+        euint8 encryptedQuality = TFHE.asEuint8(_quality);
+
+        reviews[reviewCounter] = Review({
+            paperId: _paperId,
+            reviewer: msg.sender,
+            encryptedRecommendation: encryptedRecommendation,
+            encryptedQuality: encryptedQuality,
+            comments: _comments,
+            timestamp: block.timestamp
+        });
+
+        paperReviews[_paperId].push(reviewCounter);
+        hasReviewed[msg.sender][_paperId] = true;
+        papers[_paperId].reviewCount++;
+
+        emit ReviewSubmitted(reviewCounter, _paperId, msg.sender);
+    }
+
+    /**
+     * @dev Get all papers available for review (excluding user's own papers)
+     */
+    function getPapersForReview() external view returns (Paper[] memory) {
+        uint256 availableCount = 0;
+        
+        // Count papers that are not authored by the caller
+        for (uint256 i = 1; i <= paperCounter; i++) {
+            if (papers[i].isActive && papers[i].author != msg.sender && !hasReviewed[msg.sender][i]) {
+                availableCount++;
+            }
+        }
+
+        Paper[] memory availablePapers = new Paper[](availableCount);
+        uint256 index = 0;
+
+        for (uint256 i = 1; i <= paperCounter; i++) {
+            if (papers[i].isActive && papers[i].author != msg.sender && !hasReviewed[msg.sender][i]) {
+                availablePapers[index] = papers[i];
+                index++;
+            }
+        }
+
+        return availablePapers;
+    }
+
+    /**
+     * @dev Get user's submitted papers
+     */
+    function getUserPapers() external view returns (Paper[] memory) {
+        uint256[] memory userPaperIds = userPapers[msg.sender];
+        Paper[] memory userSubmittedPapers = new Paper[](userPaperIds.length);
+
+        for (uint256 i = 0; i < userPaperIds.length; i++) {
+            userSubmittedPapers[i] = papers[userPaperIds[i]];
+        }
+
+        return userSubmittedPapers;
+    }
+
+    /**
+     * @dev Get reviews for a specific paper (only public comments, encrypted data remains private)
+     */
+    function getPaperReviews(uint256 _paperId) external view returns (Review[] memory) {
+        require(_paperId > 0 && _paperId <= paperCounter, "Invalid paper ID");
+        
+        uint256[] memory reviewIds = paperReviews[_paperId];
+        Review[] memory paperReviewsArray = new Review[](reviewIds.length);
+
+        for (uint256 i = 0; i < reviewIds.length; i++) {
+            paperReviewsArray[i] = reviews[reviewIds[i]];
+        }
+
+        return paperReviewsArray;
+    }
+
+    /**
+* @dev Get encrypted review data (decryption happens client-side)     */    function getEncryptedReview(        uint256 _reviewId    ) external view returns (ebool encryptedRecommendation, euint8 encryptedQuality) {        require(_reviewId > 0 && _reviewId <= reviewCounter, "Invalid review ID");                Review memory review = reviews[_reviewId];        Paper memory paper = papers[review.paperId];                require(            msg.sender == paper.author || msg.sender == owner(),            "Only paper author or owner can access"        );        return (review.encryptedRecommendation, review.encryptedQuality);    }    /**
+     * @dev Get paper statistics (visible to paper author)
+     */
+    function getPaperStats(uint256 _paperId) external view returns (
+        uint256 totalReviews,
+        uint256 paperTimestamp,
+        bool isActive
+    ) {
+        require(_paperId > 0 && _paperId <= paperCounter, "Invalid paper ID");
+        require(
+            papers[_paperId].author == msg.sender || msg.sender == owner(),
+            "Only paper author or owner can view stats"
+        );
+
+        Paper memory paper = papers[_paperId];
+        return (paper.reviewCount, paper.timestamp, paper.isActive);
+    }
+
+    /**
+     * @dev Toggle paper active status (only paper author)
+     */
+    function togglePaperStatus(uint256 _paperId) external {
+        require(_paperId > 0 && _paperId <= paperCounter, "Invalid paper ID");
+        require(papers[_paperId].author == msg.sender, "Only paper author can toggle status");
+
+        papers[_paperId].isActive = !papers[_paperId].isActive;
+    }
+
+    /**
+     * @dev Get total counts
+     */
+    function getTotalCounts() external view returns (uint256 totalPapers, uint256 totalReviews) {
+        return (paperCounter, reviewCounter);
+    }
+
+    /**
+     * @dev Emergency function to deactivate a paper (only owner)
+     */
+    function deactivatePaper(uint256 _paperId) external onlyOwner {
+        require(_paperId > 0 && _paperId <= paperCounter, "Invalid paper ID");
+        papers[_paperId].isActive = false;
+    }
+}
