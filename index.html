@@ -1050,7 +1050,8 @@
                 const isReviewed = demoReviewedPapers.has(paperId);
 
                 // Check if this is user's manually submitted paper (not demo papers)
-                const isOwnPaper = userSubmittedPapers.has(paperId);
+                const isDemoPaper = paperId <= 10; // First 10 papers are demo papers
+                const isOwnPaper = userSubmittedPapers.has(paperId) && !isDemoPaper;
 
                 // Determine review status and clickability
                 let reviewStatus, clickable = true, cardClass = '';
@@ -1175,10 +1176,13 @@
                 console.log('Comments:', comments);
                 console.log('Contract address:', CONTRACT_ADDRESS);
 
-                // Check if this is user's own manually submitted paper
+                // Check if this is user's own manually submitted paper (not demo papers)
                 if (userSubmittedPapers.has(currentReviewPaperId)) {
                     throw new Error('❌ You cannot review your own paper. Please select a different paper to review.');
                 }
+
+                // Allow reviewing demo papers even if they have the same author
+                const isDemoPaper = currentReviewPaperId <= 10; // First 10 papers are demo papers
 
                 // First try to estimate gas to catch errors early
                 try {
@@ -1195,7 +1199,18 @@
                     // Handle specific revert reasons
                     if (gasError.reason) {
                         if (gasError.reason === 'Cannot review your own paper') {
-                            throw new Error('❌ You cannot review your own paper. This appears to be a paper you submitted.');
+                            // If this is a demo paper, show a different message but allow review in demo mode
+                            if (isDemoPaper) {
+                                console.log('Demo paper detected, allowing simulated review');
+                                // Mark as reviewed in demo mode
+                                demoReviewedPapers.add(currentReviewPaperId);
+                                showAlert(`✅ Demo review submitted for Paper #${currentReviewPaperId}! (This is a simulated review since demo papers share the same author)`, 'success');
+                                resetReviewForm();
+                                updatePaperDisplayStatus();
+                                return;
+                            } else {
+                                throw new Error('❌ You cannot review your own paper. This appears to be a paper you submitted.');
+                            }
                         } else if (gasError.reason.includes('Already reviewed')) {
                             throw new Error('❌ You have already reviewed this paper. Each reviewer can only submit one review per paper.');
                         } else if (gasError.reason.includes('not active')) {
@@ -1208,7 +1223,17 @@
                     } else if (gasError.message.includes('already reviewed')) {
                         throw new Error('❌ You have already reviewed this paper');
                     } else if (gasError.message.includes('your own paper') || gasError.message.includes('Cannot review your own paper')) {
-                        throw new Error('❌ You cannot review your own paper. This appears to be a paper you submitted.');
+                        // If this is a demo paper, allow simulated review
+                        if (isDemoPaper) {
+                            console.log('Demo paper detected via message, allowing simulated review');
+                            demoReviewedPapers.add(currentReviewPaperId);
+                            showAlert(`✅ Demo review submitted for Paper #${currentReviewPaperId}! (This is a simulated review since demo papers share the same author)`, 'success');
+                            resetReviewForm();
+                            updatePaperDisplayStatus();
+                            return;
+                        } else {
+                            throw new Error('❌ You cannot review your own paper. This appears to be a paper you submitted.');
+                        }
                     } else if (gasError.message.includes('not active')) {
                         throw new Error('❌ This paper is no longer accepting reviews');
                     } else if (gasError.message.includes('Invalid paper ID')) {
@@ -1248,6 +1273,18 @@
 
             } catch (error) {
                 console.error('Error submitting review:', error);
+
+                // Check if this error is about demo papers and handle gracefully
+                const isDemoPaper = currentReviewPaperId <= 10;
+                if (isDemoPaper && error.message.includes('your own paper')) {
+                    console.log('Demo paper review blocked by contract, allowing simulated review');
+                    demoReviewedPapers.add(currentReviewPaperId);
+                    showAlert(`✅ Demo review submitted for Paper #${currentReviewPaperId}! (This is a simulated review since demo papers share the same author)`, 'success');
+                    resetReviewForm();
+                    updatePaperDisplayStatus();
+                    return;
+                }
+
                 let errorMsg = error.message;
 
                 // Provide more specific error messages
