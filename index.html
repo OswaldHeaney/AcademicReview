@@ -549,6 +549,46 @@
                 category: "engineering",
                 timestamp: Math.floor(Date.now() / 1000) - 432000, // 5 days ago
                 isDemo: true
+            },
+            {
+                id: 6,
+                title: "Neural Networks for Natural Language Processing",
+                paperAbstract: "An investigation into transformer architectures and their applications in multilingual text understanding. This work proposes novel attention mechanisms that improve performance on low-resource languages and cross-lingual transfer tasks.",
+                category: "computer-science",
+                timestamp: Math.floor(Date.now() / 1000) - 518400, // 6 days ago
+                isDemo: true
+            },
+            {
+                id: 7,
+                title: "Genetic Engineering in Agricultural Sustainability",
+                paperAbstract: "This research examines the role of CRISPR technology in developing drought-resistant crops. Our findings demonstrate significant yield improvements in arid environments while maintaining nutritional value and genetic diversity.",
+                category: "biology",
+                timestamp: Math.floor(Date.now() / 1000) - 604800, // 7 days ago
+                isDemo: true
+            },
+            {
+                id: 8,
+                title: "Blockchain-Based Supply Chain Transparency",
+                paperAbstract: "A novel framework for implementing blockchain technology in global supply chains to enhance traceability and reduce fraud. This study presents real-world applications and cost-benefit analyses across multiple industries.",
+                category: "computer-science",
+                timestamp: Math.floor(Date.now() / 1000) - 691200, // 8 days ago
+                isDemo: true
+            },
+            {
+                id: 9,
+                title: "Microplastic Pollution in Freshwater Systems",
+                paperAbstract: "A comprehensive analysis of microplastic contamination in rivers and lakes worldwide. Our research identifies sources, transport mechanisms, and potential health impacts on aquatic organisms and human populations.",
+                category: "biology",
+                timestamp: Math.floor(Date.now() / 1000) - 777600, // 9 days ago
+                isDemo: true
+            },
+            {
+                id: 10,
+                title: "Smart Grid Integration with IoT Devices",
+                paperAbstract: "This paper presents innovative approaches to integrating Internet of Things devices with smart grid infrastructure. We demonstrate improved energy efficiency and grid stability through real-time monitoring and predictive analytics.",
+                category: "engineering",
+                timestamp: Math.floor(Date.now() / 1000) - 864000, // 10 days ago
+                isDemo: true
             }
         ];
 
@@ -833,46 +873,83 @@
         async function loadPapersForReview() {
             try {
                 const papersList = document.getElementById('papersList');
-                
+
                 if (contract) {
-                    // Try to load real papers from contract
-                    const papers = await contract.getPapersForReview();
-                    
-                    if (papers.length === 0) {
-                        // If no real papers exist, show demo papers with option to create real ones
-                        displayPapers(globalDemoPapers);
-                        
-                        const notice = document.createElement('div');
-                        notice.style.cssText = 'text-align: center; padding: 1.5rem; border-top: 1px solid #475569; margin-top: 1rem;';
+                    // Try to load real papers from contract (excluding user's own papers)
+                    const reviewablePapers = await contract.getPapersForReview();
+
+                    // Always ensure demo papers are available as fallback
+                    let papersToShow = [];
+                    let hasRealPapers = false;
+
+                    if (reviewablePapers.length > 0) {
+                        // If there are real papers from blockchain, show them
+                        papersToShow = reviewablePapers;
+                        hasRealPapers = true;
+                    }
+
+                    // If no reviewable papers or few papers, also show demo papers for variety
+                    if (reviewablePapers.length < 3) {
+                        // Mix demo papers with real ones, but filter out any that might conflict
+                        const demoToAdd = globalDemoPapers.filter(demo =>
+                            !papersToShow.some(real => Number(real.id) === demo.id)
+                        );
+                        papersToShow = [...papersToShow, ...demoToAdd];
+                    }
+
+                    // If still no papers to show, show all demo papers
+                    if (papersToShow.length === 0) {
+                        papersToShow = globalDemoPapers;
+                    }
+
+                    displayPapers(papersToShow);
+
+                    // Add appropriate notice
+                    const notice = document.createElement('div');
+                    notice.style.cssText = 'text-align: center; padding: 1rem; font-size: 0.9rem; border-top: 1px solid #475569; margin-top: 1rem;';
+
+                    if (hasRealPapers) {
+                        notice.style.color = '#059669';
                         notice.innerHTML = `
-                            <p style="color: #94a3b8; margin-bottom: 1rem;">📝 Showing ${globalDemoPapers.length} demo papers (wallet connected)</p>
-                            <button class="btn" onclick="createDemoPapers()" style="background: #059669; margin-bottom: 0.5rem;">
-                                Submit Demo Papers to Blockchain
-                            </button>
-                            <p style="color: #64748b; font-size: 0.9rem;">
-                                Click above to submit real papers to blockchain for testing real reviews
+                            <p>✅ Showing ${reviewablePapers.length} reviewable papers from blockchain + ${papersToShow.length - reviewablePapers.length} demo papers</p>
+                            <p style="color: #64748b; font-size: 0.85rem; margin-top: 0.5rem;">
+                                Reviews on blockchain papers will be encrypted with FHE!
                             </p>
                         `;
-                        papersList.appendChild(notice);
                     } else {
-                        // Show real papers from blockchain
-                        displayPapers(papers);
-                        
-                        // Add notice about real papers
-                        const notice = document.createElement('div');
-                        notice.style.cssText = 'text-align: center; color: #059669; padding: 1rem; font-size: 0.9rem; border-top: 1px solid #475569; margin-top: 1rem;';
-                        notice.innerHTML = `✅ Showing ${papers.length} real papers from blockchain. Reviews will be encrypted with FHE!`;
-                        papersList.appendChild(notice);
+                        notice.style.color = '#94a3b8';
+                        const hasDeployedPapers = globalDemoPapers.some(paper => paper.realId);
+                        notice.innerHTML = `
+                            <p>📝 Showing ${papersToShow.length} demo papers${hasDeployedPapers ? ' (some deployed to blockchain)' : ''}</p>
+                            ${!hasDeployedPapers ? `
+                                <button class="btn" onclick="deployAllPapers()" style="background: #059669; margin-top: 1rem;">
+                                    🚀 Deploy All Papers to Blockchain
+                                </button>
+                                <p style="color: #64748b; font-size: 0.85rem; margin-top: 0.5rem;">
+                                    Deploy papers to blockchain for real encrypted reviews
+                                </p>
+                            ` : `
+                                <p style="color: #64748b; font-size: 0.85rem; margin-top: 0.5rem;">
+                                    Papers deployed! Submit your own papers to create more reviewable content.
+                                </p>
+                            `}
+                        `;
                     }
+                    papersList.appendChild(notice);
                 } else {
                     // Fallback to demo papers if no contract
-                    loadDemoPapers();
+                    displayPapers(globalDemoPapers);
+
+                    const notice = document.createElement('div');
+                    notice.style.cssText = 'text-align: center; color: #94a3b8; padding: 1rem; font-size: 0.9rem; border-top: 1px solid #475569; margin-top: 1rem;';
+                    notice.innerHTML = `📝 ${globalDemoPapers.length} demo papers available. Connect wallet to submit real blockchain transactions.`;
+                    papersList.appendChild(notice);
                 }
             } catch (error) {
                 console.error('Error loading papers:', error);
                 // Show demo papers as fallback when there's an error
                 displayPapers(globalDemoPapers);
-                
+
                 const notice = document.createElement('div');
                 notice.style.cssText = 'text-align: center; color: #ef4444; padding: 1rem; font-size: 0.9rem; border-top: 1px solid #475569; margin-top: 1rem;';
                 notice.innerHTML = `⚠️ Error loading blockchain papers. Showing demo papers instead.`;
@@ -955,17 +1032,34 @@
             const papersHtml = papers.map(paper => {
                 const paperId = Number(paper.id);
                 const isReviewed = demoReviewedPapers.has(paperId);
-                const reviewStatus = isReviewed ? 
-                    '<span style="color: #059669; font-size: 0.8rem;">✅ Reviewed</span>' : 
-                    (contract ? 
-                        '<span style="color: #3b82f6; font-size: 0.8rem;">📝 Ready for blockchain review</span>' :
-                        '<span style="color: #94a3b8; font-size: 0.8rem;">📝 Connect wallet to review</span>'
-                    );
-                
-                console.log('Processing paper:', paperId, paper.title);
-                
+
+                // Check if this is user's own paper (for real blockchain papers)
+                const isOwnPaper = paper.author && userAddress &&
+                    paper.author.toLowerCase() === userAddress.toLowerCase();
+
+                // Determine review status and clickability
+                let reviewStatus, clickable = true, cardClass = '';
+
+                if (isOwnPaper) {
+                    reviewStatus = '<span style="color: #f59e0b; font-size: 0.8rem;">👤 Your Paper</span>';
+                    clickable = false;
+                    cardClass = 'own-paper';
+                } else if (isReviewed) {
+                    reviewStatus = '<span style="color: #059669; font-size: 0.8rem;">✅ Reviewed</span>';
+                    cardClass = 'reviewed';
+                } else if (contract) {
+                    reviewStatus = '<span style="color: #3b82f6; font-size: 0.8rem;">📝 Ready for review</span>';
+                } else {
+                    reviewStatus = '<span style="color: #94a3b8; font-size: 0.8rem;">📝 Connect wallet to review</span>';
+                }
+
+                console.log('Processing paper:', paperId, paper.title, 'isOwnPaper:', isOwnPaper);
+
+                const clickHandler = clickable ? `onclick="startReview(${paperId})"` :
+                    `onclick="showAlert('❌ You cannot review your own paper. Please select a different paper to review.', 'error')"`;
+
                 return `
-                    <div class="submission-item ${isReviewed ? 'reviewed' : ''}" onclick="startReview(${paperId})">
+                    <div class="submission-item ${cardClass}" ${clickHandler} style="cursor: ${clickable ? 'pointer' : 'not-allowed'}; opacity: ${clickable ? '1' : '0.7'};">
                         <div class="submission-meta">
                             <span>Paper #${paperId}</span>
                             <span>${new Date(Number(paper.timestamp) * 1000).toLocaleDateString()}</span>
@@ -980,6 +1074,7 @@
                         <div style="margin-top: 0.5rem;">
                             ${reviewStatus}
                         </div>
+                        ${isOwnPaper ? '<div style="font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; font-style: italic;">Cannot review own papers</div>' : ''}
                     </div>
                 `;
             }).join('');
