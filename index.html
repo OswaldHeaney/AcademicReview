@@ -1051,47 +1051,90 @@
                 if (!currentReviewPaperId) {
                     throw new Error('No paper selected for review');
                 }
-                
+
                 if (!contract) {
                     throw new Error('Please connect your wallet first to submit reviews');
                 }
-                
+
                 const comments = document.getElementById('reviewComments').value || "No additional comments";
                 const qualityScore = getQualityScore(selectedQuality);
-                
+
                 console.log('Submitting review for paper ID:', currentReviewPaperId);
                 console.log('Quality score:', qualityScore);
                 console.log('Recommendation:', selectedRecommendation === 'accept');
                 console.log('Comments:', comments);
                 console.log('Contract address:', CONTRACT_ADDRESS);
-                
-                // Submit review to blockchain
+
+                // First try to estimate gas to catch errors early
+                try {
+                    const gasEstimate = await contract.submitReview.estimateGas(
+                        currentReviewPaperId,
+                        selectedRecommendation === 'accept',
+                        qualityScore,
+                        comments
+                    );
+                    console.log('Gas estimate:', gasEstimate.toString());
+                } catch (gasError) {
+                    console.error('Gas estimation failed:', gasError);
+
+                    // Handle specific revert reasons
+                    if (gasError.reason) {
+                        if (gasError.reason === 'Cannot review your own paper') {
+                            throw new Error('❌ You cannot review your own paper. Please select a different paper to review.');
+                        } else if (gasError.reason.includes('Already reviewed')) {
+                            throw new Error('❌ You have already reviewed this paper. Each reviewer can only submit one review per paper.');
+                        } else if (gasError.reason.includes('not active')) {
+                            throw new Error('❌ This paper is no longer accepting reviews.');
+                        } else if (gasError.reason.includes('Invalid paper ID')) {
+                            throw new Error('❌ Invalid paper ID. Please refresh the page and try again.');
+                        } else {
+                            throw new Error('❌ ' + gasError.reason);
+                        }
+                    } else if (gasError.message.includes('already reviewed')) {
+                        throw new Error('❌ You have already reviewed this paper');
+                    } else if (gasError.message.includes('your own paper') || gasError.message.includes('Cannot review your own paper')) {
+                        throw new Error('❌ You cannot review your own paper. Please select a different paper to review.');
+                    } else if (gasError.message.includes('not active')) {
+                        throw new Error('❌ This paper is no longer accepting reviews');
+                    } else if (gasError.message.includes('Invalid paper ID')) {
+                        throw new Error('❌ Invalid paper ID - please refresh the page');
+                    } else if (gasError.code === 'CALL_EXCEPTION') {
+                        throw new Error('❌ Transaction would fail - check if you have already reviewed this paper or if it belongs to you');
+                    } else {
+                        throw new Error('❌ Transaction validation failed: ' + gasError.message);
+                    }
+                }
+
+                // Submit review to blockchain with proper gas settings
                 const tx = await contract.submitReview(
                     currentReviewPaperId,
                     selectedRecommendation === 'accept',
                     qualityScore,
-                    comments
+                    comments,
+                    {
+                        gasLimit: 500000 // Set a reasonable gas limit
+                    }
                 );
-                
+
                 showAlert('Review submitted to blockchain. Waiting for confirmation...', 'success');
                 console.log('Transaction hash:', tx.hash);
-                
+
                 await tx.wait();
                 showAlert(`Review for Paper #${currentReviewPaperId} confirmed! Your evaluation is encrypted on blockchain.`, 'success');
-                
+
                 // Track this paper as reviewed
                 demoReviewedPapers.add(currentReviewPaperId);
-                
+
                 // Reset review form
                 resetReviewForm();
-                
+
                 // Update papers display to show reviewed status
                 updatePaperDisplayStatus();
-                
+
             } catch (error) {
                 console.error('Error submitting review:', error);
                 let errorMsg = error.message;
-                
+
                 // Provide more specific error messages
                 if (error.message.includes('already reviewed')) {
                     errorMsg = 'You have already reviewed this paper';
@@ -1103,8 +1146,14 @@
                     errorMsg = 'Invalid paper ID - please try refreshing the page';
                 } else if (error.message.includes('Connect your wallet')) {
                     errorMsg = 'Please connect your wallet first';
+                } else if (error.code === 'CALL_EXCEPTION') {
+                    errorMsg = 'Transaction failed - you may have already reviewed this paper or it may be your own paper';
+                } else if (error.message.includes('missing revert data')) {
+                    errorMsg = 'Transaction failed - please check if you have already reviewed this paper';
+                } else if (error.message.includes('Transaction validation failed')) {
+                    errorMsg = error.message;
                 }
-                
+
                 showAlert('Failed to submit review: ' + errorMsg, 'error');
             }
         }
