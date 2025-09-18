@@ -479,6 +479,9 @@
         // Track demo reviews locally (reset on page reload)
         let demoReviewedPapers = new Set();
 
+        // Track user's manually submitted papers (not demo papers)
+        let userSubmittedPapers = new Set();
+
         // DOM elements
         const connectWalletBtn = document.getElementById('connectWallet');
         const statusDot = document.getElementById('statusDot');
@@ -851,16 +854,29 @@
         async function submitPaper(title, abstract, category) {
             try {
                 if (!contract) throw new Error('Please connect your wallet first');
-                
+
                 const tx = await contract.submitPaper(title, abstract, category);
                 showAlert('Transaction submitted. Waiting for confirmation...', 'success');
-                
-                await tx.wait();
+
+                const receipt = await tx.wait();
                 showAlert('Paper submitted successfully!', 'success');
-                
+
+                // Try to get the new paper ID and mark it as user's own paper
+                try {
+                    // Get the total paper count to find the ID of the newly submitted paper
+                    const counts = await contract.getTotalCounts();
+                    const newPaperId = Number(counts.totalPapers);
+
+                    // Mark this as user's manually submitted paper
+                    userSubmittedPapers.add(newPaperId);
+                    console.log('Added paper ID', newPaperId, 'to user submitted papers');
+                } catch (error) {
+                    console.error('Error tracking submitted paper ID:', error);
+                }
+
                 // Clear form
                 document.getElementById('submitForm').reset();
-                
+
                 // Reload papers
                 await loadPapersForReview();
             } catch (error) {
@@ -1033,9 +1049,8 @@
                 const paperId = Number(paper.id);
                 const isReviewed = demoReviewedPapers.has(paperId);
 
-                // Check if this is user's own paper (for real blockchain papers)
-                const isOwnPaper = paper.author && userAddress &&
-                    paper.author.toLowerCase() === userAddress.toLowerCase();
+                // Check if this is user's manually submitted paper (not demo papers)
+                const isOwnPaper = userSubmittedPapers.has(paperId);
 
                 // Determine review status and clickability
                 let reviewStatus, clickable = true, cardClass = '';
@@ -1160,6 +1175,11 @@
                 console.log('Comments:', comments);
                 console.log('Contract address:', CONTRACT_ADDRESS);
 
+                // Check if this is user's own manually submitted paper
+                if (userSubmittedPapers.has(currentReviewPaperId)) {
+                    throw new Error('❌ You cannot review your own paper. Please select a different paper to review.');
+                }
+
                 // First try to estimate gas to catch errors early
                 try {
                     const gasEstimate = await contract.submitReview.estimateGas(
@@ -1175,7 +1195,7 @@
                     // Handle specific revert reasons
                     if (gasError.reason) {
                         if (gasError.reason === 'Cannot review your own paper') {
-                            throw new Error('❌ You cannot review your own paper. Please select a different paper to review.');
+                            throw new Error('❌ You cannot review your own paper. This appears to be a paper you submitted.');
                         } else if (gasError.reason.includes('Already reviewed')) {
                             throw new Error('❌ You have already reviewed this paper. Each reviewer can only submit one review per paper.');
                         } else if (gasError.reason.includes('not active')) {
@@ -1188,13 +1208,13 @@
                     } else if (gasError.message.includes('already reviewed')) {
                         throw new Error('❌ You have already reviewed this paper');
                     } else if (gasError.message.includes('your own paper') || gasError.message.includes('Cannot review your own paper')) {
-                        throw new Error('❌ You cannot review your own paper. Please select a different paper to review.');
+                        throw new Error('❌ You cannot review your own paper. This appears to be a paper you submitted.');
                     } else if (gasError.message.includes('not active')) {
                         throw new Error('❌ This paper is no longer accepting reviews');
                     } else if (gasError.message.includes('Invalid paper ID')) {
                         throw new Error('❌ Invalid paper ID - please refresh the page');
                     } else if (gasError.code === 'CALL_EXCEPTION') {
-                        throw new Error('❌ Transaction would fail - check if you have already reviewed this paper or if it belongs to you');
+                        throw new Error('❌ Transaction would fail - check if you have already reviewed this paper');
                     } else {
                         throw new Error('❌ Transaction validation failed: ' + gasError.message);
                     }
